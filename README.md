@@ -2,6 +2,8 @@
 
 # OpenPCDet
 
+This is a fork of [open-mmlab/OpenPCDet](https://github.com/open-mmlab/OpenPCDet) for the purpose of CSC413/2516 Deep Learning Cours projecte at the University of Toronto.
+
 `OpenPCDet` is a clear, simple, self-contained open source project for LiDAR-based 3D object detection. 
 
 It is also the official code release of [`[PointRCNN]`](https://arxiv.org/abs/1812.04244), [`[Part-A^2 net]`](https://arxiv.org/abs/1907.03670) and [`[PV-RCNN]`](https://arxiv.org/abs/1912.13192). 
