@@ -69,6 +69,13 @@ class DataProcessor(object):
         if not data_dict['use_lead_xyz']:
             voxels = voxels[..., 3:]  # remove xyz in voxels(N, 3)
 
+        # Populate empty voxel with a single point at (0, 0, 0)
+        # might not be ideal, since range is shifted
+        #TODO - create voxel with coordinates at shifted x
+        if coordinates.shape[0] < 1:
+            voxels = np.zeros((voxels.shape[0]+1, voxels.shape[1], voxels.shape[2]), dtype=voxels.dtype)
+            coordinates = np.zeros((coordinates.shape[0]+1, coordinates.shape[1]), dtype=coordinates.dtype)
+            num_points = np.ones(1, dtype=num_points.dtype)
         data_dict['voxels'] = voxels
         data_dict['voxel_coords'] = coordinates
         data_dict['voxel_num_points'] = num_points
