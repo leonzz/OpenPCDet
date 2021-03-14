@@ -39,8 +39,8 @@ def plot_range(obj_range):
 	plt.ylabel('Number of {}s'.format(class_name))
 	plt.title('Num of Objects 0.0 to 20.0 m: {} - {:.2f}% \n Num of Objects 20.0 to 40.0 m: {} - {:.2f}% \n Num of Objects 40.0 to 60.0 m: {} - {:.2f}% \n Num of Objects 60.0 to 80.0 m: {} - {:.2f}% \n'
 		.format(num_20 , (num_20/total_num_obj)*100, num_40, (num_40/total_num_obj)*100, num_60, (num_60/total_num_obj)*100, num_80, (num_80/total_num_obj)*100))
-	plt.show()
-	#plt.savefig('{}.png'.format(class_name))
+	#plt.show()
+	plt.savefig('{}.png'.format(class_name))
 
 def plot_range(obj_range_train, obj_range_val):    
 	# figure i
@@ -51,14 +51,16 @@ def plot_range(obj_range_train, obj_range_val):
 	plt.xlabel('Range Bins')
 	plt.ylabel('Number of {}s'.format(class_name))
 	plt.legend(['Training set','Validation set'])
-	plt.show()
+	#plt.show()
+	plt.savefig('haha.png')
 
 if __name__ == "__main__":
 	class_name = 'Car'
 	# extract train data
 	dataset_name = 'kitti'
 	pkl_file = '{}_infos_train.pkl'.format(dataset_name)
-	data_folder = '/home/nas/OpenPCDet-Traffic/data/kitti/'
+    # start form path of this script file and construct data folder
+	data_folder = os.path.abspath(os.path.dirname(__file__)) + '/../../data/kitti/'
 	data_full_path = os.path.join(data_folder, pkl_file)
 	with open(data_full_path, 'rb') as f:
 		dataset_info = pickle.load(f)
@@ -66,7 +68,7 @@ if __name__ == "__main__":
 	# extract val data
 	dataset_name = 'kitti'
 	pkl_file = '{}_infos_val.pkl'.format(dataset_name)
-	data_folder = '/home/nas/OpenPCDet-Traffic/data/kitti/'
+	data_folder = os.path.abspath(os.path.dirname(__file__)) + '/../../data/kitti/'
 	data_full_path = os.path.join(data_folder, pkl_file)
 	with open(data_full_path, 'rb') as f:
 		dataset_info = pickle.load(f)
