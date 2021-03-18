@@ -51,8 +51,39 @@ def plot_range(obj_range_train, obj_range_val):
 	plt.xlabel('Range Bins')
 	plt.ylabel('Number of {}s'.format(class_name))
 	plt.legend(['Training set','Validation set'])
-	#plt.show()
-	plt.savefig('haha.png')
+	plt.show()
+
+	
+def analyze_weighting_function(obj_range): 
+	n, bins, patches = plt.hist(obj_range, bins=16)
+	n = n[0:-2] # exclude last bin - no anchors there
+	bins = bins[1:-2] # first bin is zero
+	# Data distribution weighting
+	weights_num_samples= [1.0/x for x in n]
+	max_val = max(weights_num_samples)
+	weights_num_samples_norm = [x/max_val for x in weights_num_samples]
+
+
+	# log of num_samples
+	weights_log_num_samples= [1.0/np.log(x) for x in n]
+	max_val = max(weights_log_num_samples)
+	weights_log_num_samples_norm = [x/max_val for x in weights_log_num_samples]
+
+
+	# range weighting
+	max_val = max(bins)
+	weight_range_norm = [x/max_val for x in bins]
+
+	plt.figure(3)
+	plt.plot(bins, weight_range_norm, color='C1')
+	plt.plot(bins, weights_num_samples_norm, color='C2')
+	plt.plot(bins, weights_log_num_samples_norm, color='C3')
+	plt.ylabel('Weight')
+	plt.xlabel('Range (m)')
+	plt.grid(0.01)
+	plt.title('Weighting Methods')
+	plt.legend(['Range-Based', '1/Num of Samples', 'log(1/Num of Samples)'])
+	plt.show()
 
 if __name__ == "__main__":
 	class_name = 'Car'
@@ -74,7 +105,9 @@ if __name__ == "__main__":
 		dataset_info = pickle.load(f)
 	obj_pixels_val, obj_points_val, obj_range_val = get_objPix_objPts_objRange(class_name)
 	
-	plot_range(obj_range_train, obj_range_val)
+	#plot_range(obj_range_train, obj_range_val)
+
+	analyze_weighting_function(obj_range_train)
 	
 
 
