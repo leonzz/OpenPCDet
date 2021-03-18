@@ -29,6 +29,10 @@ class AnchorHeadTemplate(nn.Module):
             anchor_ndim=self.box_coder.code_size
         )
         self.anchors = [x.cuda() for x in anchors]
+        # weight based on training distribution (1/num_points_per_bin)
+        self.train_dist_weight = self.generate_anchor_train_range_weight()
+        # weight based on range from anchor to sensor
+        self.range_to_anchors = self.generate_anchor_range_weight()
         self.target_assigner = self.get_target_assigner(anchor_target_cfg)
 
         self.forward_ret_dict = {}
@@ -50,6 +54,60 @@ class AnchorHeadTemplate(nn.Module):
                 anchors_list[idx] = new_anchors
 
         return anchors_list, num_anchors_per_location_list
+
+    # This is only valid for Kitti dataset as it captures the log-normal distribution of the training set for car class
+    def generate_anchor_train_range_weight(self):
+        # 16 bins - 5 meters per bin
+        num_cars = [895.0, 1470.0, 1576.0, 1894.0, 1659.0, 1586.0, 1331.0, 1034.0,  843.0,  743.0,
+             499.0,  355.0, 220.0,  158.0,   91.0, 3.0]
+        log_num_cars = [np.log(x) for x in num_cars]
+        LOG = True
+        if LOG:
+            num_cars = log_num_cars
+        bins = [0, 9.36492297, 14.5269957,  19.68906842, 24.85114115, 30.01321388, 35.1752866,  40.33735933,
+                45.49943206, 50.66150478, 55.82357751, 60.98565024, 66.14772296, 71.30979569, 76.47186842, 81.63394114,
+                86.79601387]
+        num_bins = len(bins)
+        # weight based on range
+        anchors_location = self.anchors[0].squeeze()
+        # compute range to anchors in BEV
+        range_to_anchors = torch.sqrt(anchors_location[:, :, :, 0] * anchors_location[:, :, :, 0] + \
+                                      anchors_location[:, :, :, 1] * anchors_location[:, :, :, 1] + \
+                                      anchors_location[:, :, :, 2] * anchors_location[:, :, :, 2])
+        anchor_weights = torch.zeros(range_to_anchors.shape, dtype=range_to_anchors.dtype, device=range_to_anchors.device)
+        anchor_weights_vec = torch.zeros(range_to_anchors.shape, dtype=range_to_anchors.dtype,
+                                     device=range_to_anchors.device)
+        # NOT vectorized - left for readability
+        VEC = True
+        if not VEC:
+            for i in range(0, range_to_anchors.size(0)):
+                for j in range(0, range_to_anchors.size(1)):
+                    # range to anchor and its rotated version is the same, we choose first
+                    current_range = range_to_anchors[i, j, 0].item()
+                    for bin_idx in range(1, num_bins):
+                        if bins[bin_idx-1] <= current_range and bins[bin_idx] >= current_range:
+                            anchor_weights[i, j, :] = 1.0/num_cars[bin_idx-1]
+                            break
+        else:
+            # vectorized - might be able to do better
+            for bin_idx in range(1, num_bins):
+                greater_than =  bins[bin_idx-1] <= range_to_anchors
+                less_than = bins[bin_idx] >= range_to_anchors
+                greater_less_than = greater_than & less_than
+                anchor_weights_vec[greater_less_than] = \
+                    1.0/num_cars[bin_idx-1]
+        #assert torch.all(anchor_weights.eq(anchor_weights_vec))
+
+        return anchor_weights_vec
+
+    def generate_anchor_range_weight(self):
+        # weight based on range
+        anchors_location = self.anchors[0].squeeze()
+        # compute range to anchors in BEV
+        range_to_anchors = torch.sqrt(anchors_location[:, :, :, 0] * anchors_location[:, :, :, 0] + \
+                                      anchors_location[:, :, :, 1] * anchors_location[:, :, :, 1] + \
+                                      anchors_location[:, :, :, 2] * anchors_location[:, :, :, 2])
+        return range_to_anchors
 
     def get_target_assigner(self, anchor_target_cfg):
         if anchor_target_cfg.NAME == 'ATSS':
@@ -129,24 +187,21 @@ class AnchorHeadTemplate(nn.Module):
 
         if self.model_cfg.LOSS_CONFIG.get('RANGE_CLS_WEIGHT', None) is not None\
                 and self.model_cfg.LOSS_CONFIG.RANGE_CLS_WEIGHT['apply_range_weight']:
-            # weight based on range
-            anchors_location = self.anchors[0].squeeze()
-            # compute range to anchors in BEV
-            range_to_anchors =  torch.sqrt(anchors_location[:, :, :, 0]*anchors_location[:, :, :, 0] + \
-                                anchors_location[:, :, :, 1]*anchors_location[:, :, :, 1] + \
-                                anchors_location[:, :, :, 2]*anchors_location[:, :, :, 2])
-            # expand same range to batch size
-            range_to_anchors = range_to_anchors.unsqueeze(dim=0)
-            range_to_anchors = range_to_anchors.repeat(batch_size,1,1,1)
+            if self.model_cfg.LOSS_CONFIG.RANGE_CLS_WEIGHT['use_linear_scale']:
+                weight_anchor = self.range_to_anchors.unsqueeze(dim=0)
+            else:
+                weight_anchor = self.train_dist_weight.unsqueeze(dim=0)
+            # repeat same weights across batch
+            weight_anchor = weight_anchor.repeat(batch_size, 1, 1, 1)
             # check ranges are the same across batches
             if batch_size > 1:
-                assert torch.all(torch.eq(range_to_anchors[0,...], range_to_anchors[-1,...]))
-            range_to_anchors = range_to_anchors.view(batch_size, -1, self.num_class)
+                assert torch.all(torch.eq(weight_anchor[0,...], weight_anchor[-1,...]))
+            weight_anchor = weight_anchor.view(batch_size, -1, self.num_class)
 
             if self.model_cfg.LOSS_CONFIG.RANGE_CLS_WEIGHT['normalize_range_weights']:
-                range_to_anchors /= range_to_anchors.max()
+                weight_anchor /= weight_anchor.max()
 
-            range_weighted_cls_loss = range_to_anchors * cls_loss_src
+            range_weighted_cls_loss = weight_anchor * cls_loss_src
             cls_loss = range_weighted_cls_loss.sum() / batch_size
         else:
             cls_loss = cls_loss_src.sum() / batch_size
@@ -213,24 +268,21 @@ class AnchorHeadTemplate(nn.Module):
 
         if self.model_cfg.LOSS_CONFIG.get('RANGE_LOC_WEIGHT', None) is not None\
                 and self.model_cfg.LOSS_CONFIG.RANGE_LOC_WEIGHT['apply_range_weight']:
-            # weight based on range
-            anchors_location = self.anchors[0].squeeze()
-            # compute range to anchors in BEV
-            range_to_anchors = torch.sqrt(anchors_location[:, :, :, 0] * anchors_location[:, :, :, 0] + \
-                                          anchors_location[:, :, :, 1] * anchors_location[:, :, :, 1] + \
-                                          anchors_location[:, :, :, 2] * anchors_location[:, :, :, 2])
-            # expand same range to batch size
-            range_to_anchors = range_to_anchors.unsqueeze(dim=0)
-            range_to_anchors = range_to_anchors.repeat(batch_size, 1, 1, 1)
+            if self.model_cfg.LOSS_CONFIG.RANGE_LOC_WEIGHT['use_linear_scale']:
+                weight_anchor = self.range_to_anchors.unsqueeze(dim=0)
+            else:
+                weight_anchor = self.train_dist_weight.unsqueeze(dim=0)
+            # repeat same weights across batch
+            weight_anchor = weight_anchor.repeat(batch_size, 1, 1, 1)
             # check ranges are the same across batches
             if batch_size > 1:
-                assert torch.all(torch.eq(range_to_anchors[0, ...], range_to_anchors[-1, ...]))
-            range_to_anchors = range_to_anchors.view(batch_size, -1, self.num_class)
+                assert torch.all(torch.eq(weight_anchor[0, ...], weight_anchor[-1, ...]))
+            weight_anchor = weight_anchor.view(batch_size, -1, self.num_class)
 
-            if self.model_cfg.LOSS_CONFIG.RANGE_LOC_WEIGHT['normalize_range_weights']:
-                range_to_anchors /= range_to_anchors.max()
+            if self.model_cfg.LOSS_CONFIG.RANGE_CLS_WEIGHT['normalize_range_weights']:
+                weight_anchor /= weight_anchor.max()
 
-            range_weighted_loc_loss = range_to_anchors * loc_loss_src
+            range_weighted_loc_loss = weight_anchor * loc_loss_src
             loc_loss = range_weighted_loc_loss.sum() / batch_size
         else:
             loc_loss = loc_loss_src.sum() / batch_size
